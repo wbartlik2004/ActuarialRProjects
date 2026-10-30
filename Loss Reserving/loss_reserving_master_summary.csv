@@ -1,5 +1,4 @@
 Reserving_Method,Estimated_Reserve,Standard_Error_CV
-Standard Chain-Ladder,18680855.611924276,"$2,447,095 (CV: 0.131)"
-Bornhuetter-Ferguson (BF),17878101.79635711,N/A (A-priori assumption)
-Mack Stochastic,18680855.611924276,"$2,447,095 (CV: 0.131)"
+Chain-Ladder (Mack standard error),18680855.611924276,"$2,447,095 (CV: 0.131)"
+Bornhuetter-Ferguson (Cape Cod a priori),17469928.58790385,N/A (depends on the a priori; see bf_sensitivity.csv)
 Bootstrap VaR (90%),22808056.633230865,Empirical Tail Distribution

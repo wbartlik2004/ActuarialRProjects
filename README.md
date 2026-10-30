@@ -177,35 +177,70 @@ Study face-amount-weighted mortality too. Life insurers usually weight deaths by
 
 
 
+
+
 # Stochastic Loss Reserving in R
 
-## Overview
+A reserve estimate depends on the method you use and the judgments that go into it. This project applies the standard reserving methods to one loss triangle and compares the estimates, how uncertain they are, and which assumptions move them the most.
 
-Reserve estimates depend heavily on which method is used and which assumptions go into it. This project applies several standard reserving techniques to the same cumulative loss triangle and compares the results, the uncertainty around them, and their sensitivity to key judgments.
+**Data:** `GenIns`, the 10 x 10 cumulative general insurance claims triangle from Taylor & Ashe (1983), included in the `ChainLadder` package. Because it is a published benchmark, the results can be checked: the chain-ladder reserve and Mack standard error here match the published figures.
 
-**Data:** `GenIns`, the 10x10 cumulative general insurance loss triangle included in the `ChainLadder` package (Taylor & Ashe, 1983).
+Everything is in `LossReserving.R`. It prints the results, writes the summary tables to CSV, and saves the charts to `LossReservingGraphs/`.
 
 ## Methods
 
-| Method | Type | What it does |
-|---|---|---|
-| Chain-Ladder | Deterministic, development-based | Projects ultimates using volume-weighted age-to-age factors |
-| Bornhuetter-Ferguson | Deterministic, blended | Adds expected unreported losses (a priori ultimate x % undeveloped) to actual losses to date |
-| Mack | Stochastic, distribution-free | Same mean as chain-ladder, plus process and parameter error, giving a standard error and CV |
-| Bootstrap (ODP-style, gamma process error) | Stochastic, simulation | 5,000 simulations of the full reserve distribution, used to read off 75th/90th/95th percentiles |
+| Method | What it does |
+|---|---|
+| Chain-ladder          | Projects each accident year to ultimate with volume-weighted age-to-age factors |
 
-## Diagnostics
+| Mack                  | The same estimate as chain-ladder, plus a standard error from process risk and from the uncertainty in the estimated factors |
 
-- Calendar year effect: ANOVA on accident year and calendar year factors to test whether diagonal effects (e.g., inflation or claims-handling changes) violate chain-ladder's assumptions.
-- Tail factor sensitivity: Reserves re-estimated under tail factors of 1.00, 1.02, 1.05, and 1.10. Because the tail multiplies cumulative ultimate but not paid-to-date, a small tail change moves the reserve by a much larger percentage.
+| Bootstrap             | 5,000 resampled versions of the triangle (over-dispersed Poisson with gamma process error), giving a full distribution of the reserve |
 
-## Key Findings
+| Bornhuetter-Ferguson  | Claims to date plus an expected amount for the part not yet reported, so less developed years lean on the expectation rather than their own data |
 
-Mack was better than chain-ladder at giving a range of estimates instead of a single value, since it adds a standard error around the same reserve. I used bootstrapping as a separate method to simulate the whole reserve distribution, which also let me find VaR percentiles. BF gave a different estimate than chain-ladder because it blends the actual losses with an a priori assumption, so the recent years don't rely as heavily on a few early data points. It's more stable, but it's only as good as the a priori, and mine was an assumed placeholder. Chain-ladder is the one that can get caught in noise if a recent year happens to be out of the norm. The tail factors were interesting to test because raising the tail from 1.00 to 1.10 increased the reserve by 28.4%, way more than 10%. Using the ANOVA test, I found the calendar year effect to be significant with a p-value less than 0.001, which suggests chain-ladder's assumption that development only depends on age may not fully hold for this data.
+GenIns has no premium, so BF needs its expected losses from somewhere. I estimated them with the **Cape Cod** method: total claims to date divided by the total share reported, assuming the same exposure every year. Each year counts in proportion to how developed it is, so the expectation rests mostly on the mature years. With premium data, the same calculation would give an expected loss ratio.
 
-## Assumptions and Limitations
+## Checks on the assumptions
 
-- `GenIns` has no premium data, so BF uses an **assumed** earned premium and a 65% expected loss ratio. The BF result reflects those placeholder inputs and is illustrative, not a real a priori estimate.
-- Tail factors are chosen scenarios, not fitted from data.
-- Results are for one triangle (cumulative losses, one line of business) and ignore reinsurance, discounting, and risk margins.
-- Mack assumes independence across accident years and a variance proportional to cumulative losses.
+- **Calendar-year effects.** Chain-ladder assumes claims develop the same way at each age regardless of calendar year. I tested that by fitting log incremental claims on accident year and development year, then checking whether adding calendar year improved the fit.
+- **Tail factor.** Reserves re-estimated with tail factors of 1.00, 1.02, 1.05 and 1.10 for development after year 10.
+- **BF a priori.** BF re-run with the Cape Cod expectation 10% lower and 10% higher.
+
+## Results
+
+| | Reserve |
+|---|---|
+| Chain-ladder best estimate            | 18.68M |
+| Mack standard error                   | 2.45M (CV 13.1%) |
+| Bootstrap 90th percentile             | 22.81M |
+| BF (Cape Cod a priori of 5.18M per year) | 17.47M |
+| BF with the a priori 10% lower/higher | 15.72M / 19.22M |
+| Tail factor 1.02/1.05/1.10            | 19.74M / 21.33M / 23.98M |
+
+![What moves the reserve](LossReservingGraphs/6_what_moves_the_reserve.png)
+
+**The tail factor matters more than the choice of method.** Allowing 10% more development after year 10 raises the reserve by 5.3 million, or 28%. That is far more than 10% because the tail applies to the whole ultimate, while claims already paid stay fixed, so the entire increase lands on the reserve. It is more than four times the gap between chain-ladder and BF. The tail is also the assumption with the least data behind it, since the triangle ends at year 10.
+
+**The uncertainty is mostly in the recent years.** Mack puts one standard error at 13% of the reserve. In dollars, most of it comes from the most recent accident years, which have the largest reserves because they have the most development still to come. In percentage terms, the highest CVs are actually in old years with tiny reserves: accident year 2's reserve is under 100 thousand, so a small amount of uncertainty is a large share of it. The bootstrap gives a 90th percentile 4.1 million above the best estimate.
+
+**BF comes in 6.5% below chain-ladder.** The difference is almost all in the least developed years. Chain-ladder multiplies their small amount of data by large factors (accident year 10 has a factor of about 14 to ultimate), while BF replaces most of that projection with the Cape Cod expectation. Moving that expectation 10% either way shifts BF by about 1.75 million, so for BF the a priori is the key assumption.
+
+**No significant calendar-year effect** (F test p ≈ 0.39). Once development year is in the model, adding calendar year doesn't improve the fit, so the data gives no strong evidence against chain-ladder's assumption. My first version of this test left development year out and found a highly significant effect, but that was calendar year standing in for normal development, not a real diagonal pattern.
+
+![Bootstrap distribution](LossReservingGraphs/5_bootstrap_distribution.png)
+
+## Other charts
+
+- `1_claims_development.png`: cumulative claims by accident year, actual and projected
+- `2_development_factors.png`: each year's age-to-age factors against the selected factors, which is the variation Mack turns into a standard error
+- `3_reserve_by_year_mack.png`: reserve by accident year with one standard error either side
+- `4_chain_ladder_vs_bf.png`: chain-ladder and BF reserves by accident year
+
+## Limitations
+
+- **The tail factors are chosen scenarios, not fitted.** A fitted tail, for example from an exponential decay or inverse power curve through the later factors, would be the next step.
+- **The BF a priori comes from the same triangle.** Cape Cod is a consistent way to set it without premium, but a real BF would use an independent expectation from pricing, plans or industry data.
+- **Flat exposure.** Cape Cod assumes every accident year had the same volume of business. Real premium or policy counts would fix that.
+- **Mack assumes** that development is proportional to claims to date, that the variance is proportional too, and that accident years are independent.
+- **One triangle, one line of business,** with no inflation adjustment, reinsurance, discounting or risk margin.
