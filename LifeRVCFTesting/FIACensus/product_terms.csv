@@ -1,0 +1,2 @@
+product,index_name,crediting_method,index_alloc_pct,cap_rate,cap_guaranteed_min,floor_rate,participation_rate,fixed_rate,sc_period,free_withdrawal_pct,maturity_age,mgsv_pct,mgsv_rate,premium_years,nonrider_wd_pct
+FIA_10,S&P 500 (price return),annual point-to-point,0.8,0.05,0.01,0.0,1.0,0.02,10,0.1,95,0.875,0.01,10,0.05
