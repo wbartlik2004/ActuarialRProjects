@@ -1,0 +1,10 @@
+step,policies_left,removed
+Raw extract,25000,NA
+Remove duplicate policy IDs,25000,0
+Issue age between 18 and 90,23521,1479
+Premium positive or missing,22408,1113
+Issue date present,21688,720
+Status is a valid code,18468,3220
+Terminated policies have a termination date,18063,405
+Termination on or after issue,16277,1786
+Active policies have no termination date,16277,0

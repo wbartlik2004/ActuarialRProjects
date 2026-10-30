@@ -1,77 +1,3 @@
-# Actuarial Data Cleanup & Missing Value Imputation
-
-This project explores how different data cleaning and missing value techniques impact life insurance policy data and downstream actuarial models.
-
-It uses a synthetic dataset of enterprise policy records to walk through data hygiene, chronological audits, and a comparison of four missingness strategies.
-
-## `GenerateRawData.R`
-
-Creates a realistic, messy insurance policy extract (`enterprise_policy_extract.csv`). It simulates fields like Issue Date, Effective Date, Termination Date, Smoker Status, Gender, and Face Amount—intentionally mixing in bad values, formatting inconsistencies, and missing data:
-
-* Gender entries formatted as `"M"`, `"F"`, `"Male"`, `"Female"`, `"U"`, or left blank/`NA`.
-* Temporal issues where termination dates occur before issue dates.
-* Negative premiums and missing face amounts.
-
-## `CleaningRawData.R`
-
-Cleans the raw extract, standardizes string values, fixes date logic, and focuses the dataset specifically on a 2023 policy experience study window.
-
-It then applies four different missing data strategies and outputs four distinct CSV files:
-
-* `1DropNA.csv` (Complete-Case): Drops any row containing missing or unknown values.
-* `2MeanModeReplacement.csv` (Single Imputation): Replaces missing numerical values with the column mean and categorical blanks with the most frequent value (mode).
-* `3DeterministicRegression.csv` (Regression Imputation): Uses a linear model to calculate replacement values directly off a predicted formula line based on known policy features.
-* `4StochasticImputation.csv` (Stochastic Imputation): Uses regression predictions but adds random residual noise back in to better match realistic variation in unknown values.
-
-## `GlmCleanData.R`
-
-Plots density vs. face amount across all four tables to visually show how each cleaning technique reshapes the portfolio's distribution.
-
-What the Plots Revealed
-
-* Methods 2 & 3 (Mean/Mode & Deterministic Regression): Show the heaviest vertical spikes and central clumping. Because Method 2 dumps all missing records right at the mean and Method 3 follows a strict formula line, values cluster artificially in the center and destroy natural data spread.
-* Method 1 (Drop NA):** Gives a tamer, fairly uniform curve that matches the underlying missingness setup. However, it suffers from a reduced sample size because so many rows get thrown out.
-* Method 4 (Stochastic Imputation): Looks the most stable and realistic. It preserves row count while spreading values out with statistical noise, keeping the natural curve you'd expect in an actual portfolio.
-
-
-# Stochastic Loss Reserving in R
-
-## Overview
-
-Reserve estimates depend heavily on which method is used and which assumptions go into it. This project applies several standard reserving techniques to the same cumulative loss triangle and compares the results, the uncertainty around them, and their sensitivity to key judgments.
-
-**Data:** `GenIns`, the 10x10 cumulative general insurance loss triangle included in the `ChainLadder` package (Taylor & Ashe, 1983).
-
-## Methods
-
-| Method | Type | What it does |
-|---|---|---|
-| Chain-Ladder | Deterministic, development-based | Projects ultimates using volume-weighted age-to-age factors |
-| Bornhuetter-Ferguson | Deterministic, blended | Adds expected unreported losses (a priori ultimate x % undeveloped) to actual losses to date |
-| Mack | Stochastic, distribution-free | Same mean as chain-ladder, plus process and parameter error, giving a standard error and CV |
-| Bootstrap (ODP-style, gamma process error) | Stochastic, simulation | 5,000 simulations of the full reserve distribution, used to read off 75th/90th/95th percentiles |
-
-## Diagnostics
-
-- Calendar year effect: ANOVA on accident year and calendar year factors to test whether diagonal effects (e.g., inflation or claims-handling changes) violate chain-ladder's assumptions.
-- Tail factor sensitivity: Reserves re-estimated under tail factors of 1.00, 1.02, 1.05, and 1.10. Because the tail multiplies cumulative ultimate but not paid-to-date, a small tail change moves the reserve by a much larger percentage.
-
-## Key Findings
-
-Mack was better than chain-ladder at giving a range of estimates instead of a single value, since it adds a standard error around the same reserve. I used bootstrapping as a separate method to simulate the whole reserve distribution, which also let me find VaR percentiles. BF gave a different estimate than chain-ladder because it blends the actual losses with an a priori assumption, so the recent years don't rely as heavily on a few early data points. It's more stable, but it's only as good as the a priori, and mine was an assumed placeholder. Chain-ladder is the one that can get caught in noise if a recent year happens to be out of the norm. The tail factors were interesting to test because raising the tail from 1.00 to 1.10 increased the reserve by 28.4%, way more than 10%. Using the ANOVA test, I found the calendar year effect to be significant with a p-value less than 0.001, which suggests chain-ladder's assumption that development only depends on age may not fully hold for this data.
-
-## Assumptions and Limitations
-
-- `GenIns` has no premium data, so BF uses an **assumed** earned premium and a 65% expected loss ratio. The BF result reflects those placeholder inputs and is illustrative, not a real a priori estimate.
-- Tail factors are chosen scenarios, not fitted from data.
-- Results are for one triangle (cumulative losses, one line of business) and ignore reinsurance, discounting, and risk margins.
-- Mack assumes independence across accident years and a variance proportional to cumulative losses.
-
-
-
-
-
-
 # LifeRVCFTesting
 
 Cash flow testing for a block of fixed index annuities (FIAs), written in Python with an R version of the charts. The model rebuilds each policy's history from issue to a 12/31/2019 valuation date, projects it 50 years forward under 200 equity scenarios, values the liabilities at every year end, builds a bond portfolio to match them, and checks whether the assets hold up under interest rate and lapse stresses.
@@ -186,3 +112,100 @@ No expenses, commissions, taxes or capital requirements.
 The valuation date is 12/31/2019, so 2020 onward is projected even though it has happened, including COVID mortality.
 Index scenarios are a simple lognormal model, and the parallel rate shocks are not a full regulatory scenario set such as the New York 7.
 The policy data is simulated and most product terms are assumed, so the results say nothing about a real block.
+
+
+# Actuarial Data Cleanup
+
+Policy data rarely arrives clean. Codes are inconsistent, ages are impossible, dates are out of order, and values are missing. How you handle that changes the experience study built on top of it. This project simulates a messy life insurance extract, cleans it, fills in missing values four different ways, and checks which method gets closest to the truth, both in the data itself and in the mortality rates a model estimates from it.
+
+The data is simulated and is written in R with the tidyverse. Run the scripts in order from the folder that contains CleaningLifeData.
+
+## GenerateRawData.R
+
+Simulates 25,000 policies issued from 2010 to 2023 and pulled from the admin system on 12/31/2025.
+
+Each policy gets a true issue age, gender, smoker status and face amount. Mortality follows a Gompertz-Makeham curve by age, multiplied by 1.25 for males and 2.1 for smokers. Premium is the cost of insurance plus a 30% loading with some random variation, so it depends on face amount and the policyholder's mortality. Each policy is then run forward year by year until it dies, lapses or surrenders, or reaches the extract date still in force. Active policies have no termination date, and terminated policies end on the date of their event.
+
+The true values are saved to ground_truth.csv. The extract (enterprise_policy_extract.csv) then gets the kinds of problems real extracts have:
+
+gender and smoker status recorded in mixed formats ("M", "Male", "NS", "Non-Smoker"), with 14% of genders and 20% of smoker statuses unknown
+15% of statuses replaced by system error codes (99, ERR, NULL, EXPIRED)
+termination dates before issue dates, ages of -99 and 130, and negative premiums
+missing face amounts, premiums and dates
+
+All of the missing values are removed completely at random, which matters for which method is unbiased (see below).
+
+## CleaningRawData.R
+
+Cleaning. Standardizes the codes, then applies one rule at a time and records how many policies each removes in cleaning_log.csv, so every dropped record is accounted for. The rules remove duplicate IDs, impossible ages, negative premiums, missing issue dates, invalid status codes, terminated policies with no termination date, termination before issue, and active policies that have a termination date. I treat EXPIRED as an error code rather than a lapse, because in this data it is one. After cleaning, a set of checks stops the script if any rule is still broken.
+
+Four ways to handle missing values. Each one writes its own file:
+
+1DropNA.csv, complete-case: drops any policy with a missing face amount, premium, gender or smoker status.
+2MeanModeReplacement.csv, mean/mode: fills numbers with the average and categories with the most common value, both calculated from the data.
+3DeterministicRegression.csv, regression: predicts missing face amounts from premium and age, and missing premiums from face amount and age. Both models are on the log scale, since premium is roughly proportional to face amount. Gender and smoker status use the mode.
+4StochasticImputation.csv, stochastic regression: the same regressions plus random error the size of each model's typical miss, so the filled-in values vary the way real ones do. Working on the log scale keeps every value positive. Gender and smoker status are drawn at random in proportion to the known mix instead of all being set to the most common value.
+
+Exposure. Each table gets exposure for a 2019 to 2023 study. Active policies are exposed through the end of the study. Terminated policies are exposed to their termination date, and the termination counts as an event only if it happens inside the window.
+
+## GlmCleanData.R
+
+Compares the methods three ways:
+
+Distribution. A density plot of face amounts for each method (imputation_plot.png).
+Mortality. A Poisson GLM of deaths with a log link and log(exposure) as an offset, fitted to each table, so the coefficients are mortality multipliers that can be compared with the true 1.25 and 2.1 (glm_multipliers.png, glm_multipliers.csv).
+Accuracy. Filled-in values compared with ground_truth.csv: average error, how much of the true spread each method keeps, and how often the filled-in gender and smoker status are right (imputation_accuracy.csv).
+Results
+<!-- Fill these in after rerunning all three scripts. The file each number comes from is in brackets. -->
+
+Cleaning. Of 25,000 policies, ___ passed cleaning [cleaning_log.csv]. The biggest single cut was ___, which removed ___.
+
+Distributions. <!-- Look at imputation_plot.png and spread_ratio in imputation_accuracy.csv (1.0 = same spread as the truth). Expect mean/mode to show a spike at the average face amount with almost no spread. Check whether regression narrows the spread and whether stochastic keeps it. --> ___
+
+Accuracy of filled-in values. <!-- imputation_accuracy.csv: mean_error shows bias, mean_absolute_error shows how far off a typical value is. Compare gender_correct and smoker_correct for mode (methods 2 and 3) against random draws (method 4). --> ___
+
+Mortality multipliers. <!-- glm_multipliers.csv. Check which method's smoker and male multipliers land closest to 2.1 and 1.25, and whether the dashed line falls inside each interval. Methods 2 to 4 all label some true smokers as non-smokers, which should pull the smoker multiplier toward 1. --> ___
+
+What I'd recommend. <!-- Because the data is missing completely at random, complete-case should be unbiased, at the cost of fewer policies and wider intervals. Say whether the results bear that out. --> ___
+
+## What I'd do differently with real data
+Find out why values are missing before choosing a method. Here they are missing completely at random, so dropping incomplete records is unbiased. If larger policies were more likely to be missing, dropping them or filling in the average would understate face amounts, and only a method that uses related fields, like premium, could recover them.
+Use multiple imputation instead of one random draw. Filling in the gaps several times and combining the results shows how uncertain the imputed values are. R's mice package with predictive mean matching would be the next step.
+Fix errors at the source. If a large share of records fails the same check, that is a system problem to raise with IT, not just something to delete. Some errors can be repaired, for example rebuilding an age from date of birth.
+Study face-amount-weighted mortality too. Life insurers usually weight deaths by face amount, and that is where how you fill in face amounts really matters.
+
+
+
+
+# Stochastic Loss Reserving in R
+
+## Overview
+
+Reserve estimates depend heavily on which method is used and which assumptions go into it. This project applies several standard reserving techniques to the same cumulative loss triangle and compares the results, the uncertainty around them, and their sensitivity to key judgments.
+
+**Data:** `GenIns`, the 10x10 cumulative general insurance loss triangle included in the `ChainLadder` package (Taylor & Ashe, 1983).
+
+## Methods
+
+| Method | Type | What it does |
+|---|---|---|
+| Chain-Ladder | Deterministic, development-based | Projects ultimates using volume-weighted age-to-age factors |
+| Bornhuetter-Ferguson | Deterministic, blended | Adds expected unreported losses (a priori ultimate x % undeveloped) to actual losses to date |
+| Mack | Stochastic, distribution-free | Same mean as chain-ladder, plus process and parameter error, giving a standard error and CV |
+| Bootstrap (ODP-style, gamma process error) | Stochastic, simulation | 5,000 simulations of the full reserve distribution, used to read off 75th/90th/95th percentiles |
+
+## Diagnostics
+
+- Calendar year effect: ANOVA on accident year and calendar year factors to test whether diagonal effects (e.g., inflation or claims-handling changes) violate chain-ladder's assumptions.
+- Tail factor sensitivity: Reserves re-estimated under tail factors of 1.00, 1.02, 1.05, and 1.10. Because the tail multiplies cumulative ultimate but not paid-to-date, a small tail change moves the reserve by a much larger percentage.
+
+## Key Findings
+
+Mack was better than chain-ladder at giving a range of estimates instead of a single value, since it adds a standard error around the same reserve. I used bootstrapping as a separate method to simulate the whole reserve distribution, which also let me find VaR percentiles. BF gave a different estimate than chain-ladder because it blends the actual losses with an a priori assumption, so the recent years don't rely as heavily on a few early data points. It's more stable, but it's only as good as the a priori, and mine was an assumed placeholder. Chain-ladder is the one that can get caught in noise if a recent year happens to be out of the norm. The tail factors were interesting to test because raising the tail from 1.00 to 1.10 increased the reserve by 28.4%, way more than 10%. Using the ANOVA test, I found the calendar year effect to be significant with a p-value less than 0.001, which suggests chain-ladder's assumption that development only depends on age may not fully hold for this data.
+
+## Assumptions and Limitations
+
+- `GenIns` has no premium data, so BF uses an **assumed** earned premium and a 65% expected loss ratio. The BF result reflects those placeholder inputs and is illustrative, not a real a priori estimate.
+- Tail factors are chosen scenarios, not fitted from data.
+- Results are for one triangle (cumulative losses, one line of business) and ignore reinsurance, discounting, and risk margins.
+- Mack assumes independence across accident years and a variance proportional to cumulative losses.
